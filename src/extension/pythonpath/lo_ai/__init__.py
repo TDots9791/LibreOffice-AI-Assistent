@@ -1,0 +1,1 @@
+# LibreOffice AI Assistant package.

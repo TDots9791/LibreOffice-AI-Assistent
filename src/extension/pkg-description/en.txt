@@ -1,0 +1,4 @@
+AI chat assistant for Writer, Calc, Impress and Draw.
+Works with Z.ai (GLM Coding Plan), Anthropic Claude, OpenAI / Codex,
+Gemini, OpenRouter, DeepSeek, Mistral, Groq, xAI, Ollama (local) and any
+OpenAI-compatible endpoint.

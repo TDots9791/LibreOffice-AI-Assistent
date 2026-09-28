@@ -1,0 +1,4 @@
+AI-ассистент для Writer, Calc, Impress и Draw.
+Работает с Z.ai (GLM Coding Plan), Anthropic Claude, OpenAI / Codex,
+Gemini, OpenRouter, DeepSeek, Mistral, Groq, xAI, Ollama (локально) и
+любым OpenAI-совместимым API.
