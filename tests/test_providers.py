@@ -11,7 +11,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)                                    # mock_server
-sys.path.insert(0, os.path.join(ROOT, "src", "extension", "pythonpath"))
+sys.path.insert(0, os.path.join(ROOT, "src", "extension", "Scripts", "python", "pythonpath"))
 
 import mock_server                                          # noqa: E402
 from lo_ai import http_client                               # noqa: E402

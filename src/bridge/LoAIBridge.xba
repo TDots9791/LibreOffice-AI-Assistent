@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE script:module PUBLIC "-//OpenOffice.org//DTD OfficeDocument 1.0//EN" "module.dtd">
+<script:module xmlns:script="http://openoffice.org/2000/script" script:name="LoAIBridge" script:language="StarBasic">REM Bridge: Addons menu -> python extension (shows any error)
+
+Sub RegisterSidebarFactory
+    Dim oCtx, oMgr, sResult
+    On Error Resume Next
+    oCtx = GetProcessServiceManager().DefaultContext
+    oMgr = oCtx.getValueByName(&quot;/singletons/com.sun.star.ui.theUIElementFactoryManager&quot;)
+    Err.Clear
+    oMgr.registerFactory(&quot;loai&quot;, &quot;&quot;, &quot;&quot;, &quot;org.sphaera.lo.ai.uifactory&quot;)
+    If Err &lt;&gt; 0 Then sResult = &quot;err1=&quot; &amp; Err
+    Err.Clear
+    oMgr.registerFactory(&quot;loai&quot;, &quot;panel&quot;, &quot;&quot;, &quot;org.sphaera.lo.ai.uifactory&quot;)
+    If Err &lt;&gt; 0 Then sResult = sResult &amp; &quot; err2=&quot; &amp; Err
+    If Err = 0 And sResult = &quot;&quot; Then sResult = &quot;ok&quot;
+    LogWrite(&quot;OnStartApp register: &quot; &amp; sResult)
+    On Error Goto 0
+End Sub
+
+Sub LogWrite(sText)
+    Dim iFile
+    On Error Resume Next
+    iFile = FreeFile
+    Open Environ(&quot;HOME&quot;) &amp; &quot;/.var/app/org.libreoffice.LibreOffice/config/lo-ai-assistant/basic.log&quot; For Append As #iFile
+    Print #iFile, Now &amp; &quot; &quot; &amp; sText
+    Close #iFile
+    On Error Goto 0
+End Sub
+
+Sub lo_open_panel
+    RegisterSidebarFactory
+    LoRun(&quot;open_panel&quot;)
+End Sub
+
+Sub lo_open_settings
+    RegisterSidebarFactory
+    LoRun(&quot;open_settings&quot;)
+End Sub
+
+Sub LoRun(sAction)
+    Dim oSPF, oProv, oScript, sUrl
+    On Error Goto Fail
+    oSPF = GetProcessServiceManager().createInstance(&quot;com.sun.star.script.provider.MasterScriptProviderFactory&quot;)
+    oProv = oSPF.createScriptProvider(&quot;&quot;)
+    sUrl = &quot;vnd.sun.star.script:sphaera-lo-ai-assistant.oxt|Scripts/python/ai_assistant_entry.py$&quot; &amp; sAction &amp; &quot;?language=Python&amp;location=user:uno_packages&quot;
+    oScript = oProv.getScript(sUrl)
+    oScript.invoke(Array(), Array(), Array())
+    Exit Sub
+Fail:
+    Dim sErr
+    sErr = &quot;AI Assistant: &quot; &amp; Err &amp; &quot; | &quot; &amp; Error$ &amp; &quot; | line &quot; &amp; Erl &amp; Chr(10) &amp; sUrl
+    On Error Goto Fail2
+    oProv.getScript(&quot;vnd.sun.star.script:ai_assistant_entry.py$&quot; &amp; sAction &amp; &quot;?language=Python&amp;location=user&quot;).invoke(Array(), Array(), Array())
+    Exit Sub
+Fail2:
+    MsgBox sErr &amp; Chr(10) &amp; Chr(10) &amp; &quot;fallback also failed: &quot; &amp; Err &amp; &quot; | &quot; &amp; Error$ &amp; &quot; | line &quot; &amp; Erl, 16, &quot;AI Assistant&quot;
+End Sub</script:module>

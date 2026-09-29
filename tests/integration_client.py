@@ -75,7 +75,7 @@ def main():
 
     # ---- 1. document bridge (batched first: the bridge dies young) ----
     try:
-        sys.path.insert(0, os.path.join(ext_dir, "pythonpath"))
+        sys.path.insert(0, os.path.join(ext_dir, "Scripts", "python", "pythonpath"))
         from lo_ai import document_bridge as db
 
         hidden = uno.createUnoStruct("com.sun.star.beans.PropertyValue")
@@ -121,8 +121,8 @@ def main():
 
     # ---- 3. entry module smoke test (in-process, remote ctx) ----
     try:
-        entry_path = os.path.join(ext_dir, "ai_assistant_entry.py")
-        sys.path.insert(0, os.path.join(ext_dir, "pythonpath"))
+        entry_path = os.path.join(ext_dir, "Scripts", "python", "ai_assistant_entry.py")
+        sys.path.insert(0, os.path.join(ext_dir, "Scripts", "python", "pythonpath"))
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             "ai_assistant_entry_installed", entry_path)

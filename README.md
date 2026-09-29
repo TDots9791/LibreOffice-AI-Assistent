@@ -2,13 +2,14 @@
 
 Мультипровайдерный AI-ассистент для LibreOffice (Writer, Calc, Impress, Draw) в виде расширения `.oxt`. Работает по API с **Z.ai (GLM Coding Plan)**, **Anthropic Claude**, **OpenAI / Codex**, **Gemini**, **OpenRouter**, **DeepSeek**, **Mistral**, **Groq**, **xAI**, **Together**, **Fireworks**, **Perplexity**, **Ollama / LM Studio (локально)** — и с любым OpenAI-совместимым endpoint (vLLM, LiteLLM, шлюзы).
 
-![version](https://img.shields.io/badge/version-1.0.0-blue) ![platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey)
+![version](https://img.shields.io/badge/version-1.3.1-blue) ![platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey)
 
 ---
 
 ## Возможности
 
-- **Панель-чат** (немодальное окно) с потоковым выводом ответа и кнопкой «Стоп».
+- **Два режима UI**: боковая всплывающая панель (sidebar-дек справа, вкладка «AI-ассистент») и отдельное плавающее окно. Интерфейс на русском (авто-определение; английский и китайский — дополнительные; можно задать вручную: `"ui_lang": "ru|en|zh"` в config.json).
+- **Панель-чат** (немодальное окно, закрывается крестиком) с потоковым выводом ответа и кнопкой «Стоп».
 - **Осведомлённость о документе**: автоматически подхватывает выделенный текст / активную ячейку / текст фигуры или слайда и передаёт модели как контекст.
 - **Вставка результата в документ**:
   - Writer — вставка на позицию курсора или замена выделения;
@@ -62,7 +63,10 @@
 2. При первом запуске откройте **Tools ▸ AI Assistant Settings…** (или «Settings…» в панели):
    - выберите пресет провайдера — base URL и модель подставятся автоматически;
    - вставьте API-ключ;
-   - нажмите **Test connection** → **Save**.
+   - **Refresh** (рядом с Model) — подтягивает **живой список моделей** у провайдера
+     (`GET /models`); этот же список подгружается автоматически после успешного
+     **Test connection**;
+   - **Test connection** → **Save** (диалог закрывается, подтверждение — «Настройки сохранены»).
 3. Пишите в нижнее поле и жмите **Send**. Ответ можно **Insert** (в курсор), **Replace** (заменить выделение) или **Copy**.
 
 ### Настройка провайдеров
@@ -84,7 +88,7 @@
 
 **Codex**: модели `gpt-5.1-codex-max`, `gpt-5.1-codex`, `gpt-5-codex`, `codex-mini-latest` обслуживаются только через Responses API — пресет «OpenAI (Codex)» включает нужный API-стиль автоматически.
 
-**Заметки по моделям**: имена моделей — редактируемые поля, а не жёсткий список (списки в пресетах актуальны на дату релиза). Для reasoning-моделей OpenAI (`o1/o3/o4`, `gpt-5*`) расширение само убирает `temperature` и шлёт `max_completion_tokens` вместо `max_tokens`.
+**Заметки по моделям**: списки в пресетах — только предзагрузка (актуальны на сентябрь 2026: Z.ai — glm-5.3/glm-5.3-flash, Claude — sonnet-4-5/opus-4-1, Codex — gpt-5.3-codex/5.1-codex-max и т.д.); главный источник — кнопка **Refresh**, тянущая `/models` у самого провайдера (работает для всех OpenAI-совместимых, Anthropic, Ollama, LM Studio). Для reasoning-моделей OpenAI (`o1/o3/o4`, `gpt-5*`) расширение само убирает `temperature` и шлёт `max_completion_tokens` вместо `max_tokens`.
 
 ## Безопасность
 
@@ -99,10 +103,11 @@ API-ключи хранятся **локально** в JSON-конфиге с �
 
 ```
 src/extension/
-├── ai_assistant_entry.py        # entry-точки Scripting Framework (open_panel, open_settings, тесты)
-├── Addons.xcu                   # пункты меню Tools + кнопка тулбара
-├── description.xml, META-INF/   # манифест .oxt
-└── pythonpath/lo_ai/
+├── Scripts/python/
+│   ├── ai_assistant_entry.py    # python-компонент (service:org.sphaera.lo.ai.panel/.settings)
+│   ├── lo_ai_sidebar.py         # XUIElementFactory + startup-job для sidebar-режима
+│   │                            # + функции для Tools > Macros (open_panel, open_settings, smoke_test)
+│   └── pythonpath/lo_ai/        # код расширения (папка pythonpath подхватывается автоматически)
     ├── config.py                # JSON-конфиг (без UNO — тестируется вне LO)
     ├── http_client.py           # urllib + SSE-стриминг + отмена (threading.Event)
     ├── uno_env.py               # путь конфига через PathSettings (работает и в flatpak)
@@ -134,7 +139,7 @@ python3 tests/test_providers.py   # юнит-тесты (хостовый python
 Известные ограничения:
 
 - В LibreOffice 26.8 **flatpak** удалённый URP-мост (`--accept=socket`) нестабилен — это особенность сборки, не расширения: ассистент работает in-process и её не касается. Из-за неё `tests/integration_client.py` в этой среде может не пройти; на нативных установках тест работает.
-- Имена скриптов в `Addons.xcu` используют схему `vnd.sun.star.script:sphaera-lo-ai-assistant.oxt|ai_assistant_entry.py$<func>?language=Python&location=user:uno_packages` — имя пакета в имени скрипта, разделитель `|`, location без суффикса. Это рабочая форма современных LibreOffice (проверено по `pythonscript.py` 26.8); старые примеры с `location=user:uno_packages/<имя>.oxt` не работают. Не переименовывайте oxt при пересборке.
+- Регистрация скриптов (проверено по `pythonscript.py` и dp-бэкендам 26.8, образец — APSO): entry-файл объявляется в манифесте как `application/vnd.sun.star.uno-component;type=Python`, для индексации нужен ещё каталог с `application/vnd.sun.star.framework-script`; `framework-script` на ОТДЕЛЬНЫЙ ФАЙЛ ломает активацию пакета. Меню деспатчатся через `service:`-URL (XJobExecutor), это надёжнее `vnd.sun.star.script:`-схем (те требуют `|`-разделитель и точный location).
 - В LO 24.2 была регрессия регистрации python-пакетов в `.oxt` (исправлена в последующих релизах).
 
 ## Лицензия
