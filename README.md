@@ -7,6 +7,19 @@
 
 <div align="center">
 
+[![⚠ Модель видит ПДн из ваших документов — обезличьте перед отправкой](https://img.shields.io/badge/⚠_МОДЕЛЬ_ВИДИТ_ПДн_ИЗ_ВАШИХ_ДОКУМЕНТОВ-обезличьте_перед_отправкой-c0392b?style=for-the-badge)](https://iustitia.tech/incognito/)
+
+</div>
+
+> **⚠️ Приватность.** В режимах «Работать с документом» и «Учитывать документ» содержимое
+> документа (текст, ячейки, выделение) передаётся выбранному AI-провайдеру — то есть модель
+> **видит персональные данные, содержащиеся в документе**. Если в документе есть ПДн,
+> заранее обезличьте его. Быстрый способ: **[Incognito Web](https://iustitia.tech/incognito/demo/)**
+> (прямо в браузере, без установки) или **[Incognito Desktop](https://iustitia.tech/incognito/)**
+> (для регулярной работы) — [iustitia.tech/incognito](https://iustitia.tech/incognito/).
+
+<div align="center">
+
 ![версия](https://img.shields.io/badge/версия-1.13.0-2f8f8b?style=flat-square)
 ![лицензия](https://img.shields.io/badge/лицензия-MIT-a6784f?style=flat-square)
 ![Python](https://img.shields.io/badge/Python-встроенный%20в%20LO-1d2324?style=flat-square&logo=python&logoColor=f4efe6)
@@ -142,6 +155,12 @@ API-ключи хранятся **только локально** в JSON-кон
 (`…/user/config/lo-ai-assistant/config.json` в профиле LibreOffice; вне офиса —
 `$APPDATA/lo-ai-assistant` или `$XDG_CONFIG_HOME/lo-ai-assistant`). Ключи передаются
 лишь выбранному вами API-провайдеру. Не коммитьте конфиг в git.
+
+**Про персональные данные** — см. предупреждение в начале страницы: в агентном режиме
+и при включённом контексте содержимое документа уходит выбранному AI-провайдеру.
+Перед работой с документами, содержащими ПДн, обезличьте их — например,
+[Incognito Web](https://iustitia.tech/incognito/demo/) или
+[Incognito Desktop](https://iustitia.tech/incognito/).
 
 ## Разработка
 
