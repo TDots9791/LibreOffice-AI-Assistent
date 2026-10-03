@@ -6,12 +6,7 @@
                        manifest:media-type="application/vnd.sun.star.uno-component;type=Python"/>
   <manifest:file-entry manifest:full-path="Scripts/python/lo_ai_sidebar.py"
                        manifest:media-type="application/vnd.sun.star.uno-component;type=Python"/>
-  <manifest:file-entry manifest:full-path="Sidebar.xcu"
-                       manifest:media-type="application/vnd.sun.star.configuration-data"/>
-  <manifest:file-entry manifest:full-path="Jobs.xcu"
-                       manifest:media-type="application/vnd.sun.star.configuration-data"/>
-  <manifest:file-entry manifest:full-path="Events.xcu"
-                       manifest:media-type="application/vnd.sun.star.configuration-data"/>
+
   <manifest:file-entry manifest:media-type="application/vnd.sun.star.framework-script"
                        manifest:full-path="Scripts/python"/>
 </manifest:manifest>

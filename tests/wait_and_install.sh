@@ -2,19 +2,22 @@
 # Waits for LibreOffice to close, then installs the extension cleanly.
 # Writes progress to /tmp/loai_install_status.txt
 set -u
+# singleton: второй запуск тихо выходит (гонка двух установщиков ломала реестр)
+exec 9>/tmp/loai_waiter.lock
+flock -n 9 || { echo "another installer is running"; exit 0; }
 STATUS=/tmp/loai_install_status.txt
-OXT="/home/mike/MyRepos/LibreOffice AI Assistent/dist/sphaera-lo-ai-assistant.oxt"
+OXT="$(cd "$(dirname "$0")/.." && pwd)/dist/sphaera-lo-ai-assistant.oxt"
 UNOPKG=/app/libreoffice/program/unopkg
 : > "$STATUS"
 
-for i in $(seq 1 110); do
+for i in $(seq 1 360); do
   if ! pgrep -f "[s]office.bin" >/dev/null 2>&1; then
     echo "LO closed after $((i*5))s; installing..." >> "$STATUS"
     sleep 2
     if pgrep -f "[s]office.bin" >/dev/null 2>&1; then
       echo "LO reopened, aborting" >> "$STATUS"; exit 1
     fi
-    P=/home/mike/.var/app/org.libreoffice.LibreOffice/config/libreoffice/4/user/uno_packages
+    P="$HOME/.var/app/org.libreoffice.LibreOffice/config/libreoffice/4/user/uno_packages"
     rm -rf "$P/cache"
     if flatpak run --command="$UNOPKG" org.libreoffice.LibreOffice add "$OXT" >> "$STATUS" 2>&1; then
       echo "ADD OK" >> "$STATUS"
@@ -31,5 +34,5 @@ for i in $(seq 1 110); do
   fi
   sleep 5
 done
-echo "TIMEOUT: LO still running after ~9 minutes" >> "$STATUS"
+echo "TIMEOUT: LO still running after ~30 minutes" >> "$STATUS"
 exit 1

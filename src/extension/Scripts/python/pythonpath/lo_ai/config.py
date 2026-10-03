@@ -25,6 +25,8 @@ _DEFAULTS = {
     "include_context": True,
     "context_chars": 6000,
     "history_messages": 8,
+    "agent_enabled": True,
+    "agent_max_steps": 12,
     "providers": {},
 }
 

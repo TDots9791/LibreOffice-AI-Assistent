@@ -17,7 +17,7 @@
         <node oor:name="Submenu">
           <node oor:name="m1" oor:op="replace">
             <prop oor:name="URL" oor:type="xs:string">
-              <value>vnd.sun.star.script:Standard.LoAIBridge.lo_open_panel?language=Basic&amp;location=application</value>
+              <value>service:org.sphaera.lo.ai.panel.impl</value>
             </prop>
             <prop oor:name="Title" oor:type="xs:string">
               <value xml:lang="en-US">Open Panel...</value>
@@ -35,7 +35,7 @@
           </node>
           <node oor:name="m2" oor:op="replace">
             <prop oor:name="URL" oor:type="xs:string">
-              <value>vnd.sun.star.script:Standard.LoAIBridge.lo_open_settings?language=Basic&amp;location=application</value>
+              <value>service:org.sphaera.lo.ai.settings.impl</value>
             </prop>
             <prop oor:name="Title" oor:type="xs:string">
               <value xml:lang="en-US">Settings...</value>
@@ -59,7 +59,7 @@
       <node oor:name="org.sphaera.lo.ai.toolbar" oor:op="replace">
         <node oor:name="m1" oor:op="replace">
           <prop oor:name="URL" oor:type="xs:string">
-            <value>vnd.sun.star.script:Standard.LoAIBridge.lo_open_panel?language=Basic&amp;location=application</value>
+            <value>service:org.sphaera.lo.ai.panel.impl</value>
           </prop>
           <prop oor:name="Title" oor:type="xs:string">
             <value xml:lang="en-US">AI Assistant</value>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dlg:window PUBLIC "-//OpenOffice.org//DTD OfficeDocument 1.0//EN" "dialog.dtd">
+<dlg:window xmlns:dlg="http://openoffice.org/2000/dialog" dlg:id="AIChat" dlg:left="0" dlg:top="0" dlg:width="180" dlg:height="210" dlg:closeable="false" dlg:moveable="false" dlg:title="AI-ассистент">
+ <dlg:bulletinboard>
+  <dlg:combobox dlg:id="cmbProvider" dlg:tab-index="0" dlg:left="2" dlg:top="2" dlg:width="78" dlg:height="10" dlg:spin="true"/>
+  <dlg:combobox dlg:id="cmbModel" dlg:tab-index="1" dlg:left="82" dlg:top="2" dlg:width="62" dlg:height="10" dlg:spin="true"/>
+  <dlg:button dlg:id="btnSettings" dlg:tab-index="2" dlg:left="146" dlg:top="2" dlg:width="18" dlg:height="10" dlg:value="…"/>
+  <dlg:checkbox dlg:id="chkContext" dlg:tab-index="3" dlg:left="2" dlg:top="14" dlg:width="130" dlg:height="8" dlg:value="Учитывать выделенный текст / контекст документа" dlg:checked="true"/>
+  <dlg:combobox dlg:id="cmbAction" dlg:tab-index="4" dlg:left="2" dlg:top="24" dlg:width="70" dlg:height="10" dlg:spin="true"/>
+  <dlg:textfield dlg:id="txtLang" dlg:tab-index="5" dlg:left="74" dlg:top="24" dlg:width="36" dlg:height="10" dlg:value="English"/>
+  <dlg:textfield dlg:id="txtChat" dlg:tab-index="6" dlg:left="2" dlg:top="36" dlg:width="162" dlg:height="118" dlg:multiline="true" dlg:vscroll="true" dlg:readonly="true"/>
+  <dlg:textfield dlg:id="txtInput" dlg:tab-index="7" dlg:left="2" dlg:top="156" dlg:width="162" dlg:height="24" dlg:multiline="true" dlg:vscroll="true"/>
+  <dlg:button dlg:id="btnSend" dlg:tab-index="8" dlg:left="2" dlg:top="182" dlg:width="30" dlg:height="10" dlg:value="Отправить"/>
+  <dlg:button dlg:id="btnStop" dlg:tab-index="9" dlg:left="34" dlg:top="182" dlg:width="24" dlg:height="10" dlg:value="Стоп"/>
+  <dlg:button dlg:id="btnInsert" dlg:tab-index="10" dlg:left="60" dlg:top="182" dlg:width="30" dlg:height="10" dlg:value="Вставить"/>
+  <dlg:button dlg:id="btnReplace" dlg:tab-index="11" dlg:left="92" dlg:top="182" dlg:width="34" dlg:height="10" dlg:value="Заменить"/>
+  <dlg:button dlg:id="btnCopy" dlg:tab-index="12" dlg:left="128" dlg:top="182" dlg:width="30" dlg:height="10" dlg:value="Копировать"/>
+  <dlg:text dlg:id="lblStatus" dlg:tab-index="13" dlg:left="2" dlg:top="194" dlg:width="162" dlg:height="8" dlg:value="Готово."/>
+ </dlg:bulletinboard>
+</dlg:window>

@@ -18,12 +18,16 @@ def _is_reasoning_family(model):
     return m.startswith(_REASONING_PREFIXES)
 
 
-def build_payload(provider, messages, stream):
+def build_payload(provider, messages, stream, tools=None):
     payload = {
         "model": provider.model,
         "messages": messages,
         "stream": bool(stream),
     }
+    if tools:
+        payload["tools"] = [{"type": "function", "function": t}
+                            for t in tools]
+        payload["tool_choice"] = "auto"
     if provider.max_tokens:
         if _is_reasoning_family(provider.model):
             payload["max_completion_tokens"] = provider.max_tokens
@@ -32,6 +36,24 @@ def build_payload(provider, messages, stream):
     if provider.temperature is not None and not _is_reasoning_family(provider.model):
         payload["temperature"] = provider.temperature
     return payload
+
+
+def parse_turn(data):
+    """AssistantTurn from a chat.completion (text and/or tool_calls)."""
+    from .base import AssistantTurn
+    try:
+        message = data["choices"][0]["message"] or {}
+    except (KeyError, IndexError, TypeError):
+        raise ProviderError("Unexpected answer format: %s" % str(data)[:200])
+    if isinstance(message.get("error"), dict):
+        raise ProviderError(message["error"].get("message") or "provider error")
+    calls = []
+    for tc in message.get("tool_calls") or []:
+        fn = tc.get("function") or {}
+        calls.append({"id": tc.get("id") or fn.get("name") or "call",
+                      "name": fn.get("name") or "",
+                      "args": fn.get("arguments") or "{}"})
+    return AssistantTurn(content=message.get("content"), tool_calls=calls)
 
 
 def extract_delta(obj):
@@ -56,6 +78,7 @@ def extract_delta(obj):
 
 class OpenAICompatProvider(Provider):
     api_style = "openai"
+    supports_tools = True
 
     def _url(self):
         if not self.base_url:
@@ -78,6 +101,14 @@ class OpenAICompatProvider(Provider):
             return data["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError, TypeError):
             raise ProviderError("Unexpected answer format: %s" % str(data)[:200])
+
+    def chat_with_tools(self, messages, tools, cancel=None):
+        """One non-streaming turn with function calling (OpenAI shape)."""
+        payload = build_payload(self, messages, stream=False, tools=tools)
+        data = wrap_errors(lambda: http_client.post_json(
+            self._url(), self._auth(), payload,
+            timeout=self.timeout, cancel=cancel))
+        return parse_turn(data)
 
     def stream_chat(self, messages, on_delta, cancel=None):
         if not self.streaming:

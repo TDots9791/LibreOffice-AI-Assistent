@@ -154,14 +154,23 @@ class SettingsDialog(object):
         add_control(m, "FixedText", "lblTimeout", {"Label": tr("timeout")}, 8, 182, 90, 12)
         add_control(m, "Edit", "txtTimeout", {"Text": "180"}, 100, 179, 60, 12)
 
+        add_control(m, "FixedText", "lblPanelSize",
+                    {"Label": "Размер панели, px (ширина × высота):"},
+                    8, 202, 220, 12)
+        add_control(m, "Edit", "txtPanelW", {"Text": "380"}, 232, 200, 60, 12)
+        add_control(m, "Edit", "txtPanelH", {"Text": "344"}, 300, 200, 60, 12)
+        add_control(m, "FixedText", "lblPanelHint",
+                    {"Label": "Прозрачность окна не поддерживается этой сборкой LibreOffice."},
+                    8, 218, W - 16, 10)
+
         add_control(m, "CheckBox", "chkStream",
                     {"Label": tr("stream"), "State": 1},
-                    8, 202, 300, 10)
+                    8, 234, 300, 10)
 
-        add_control(m, "FixedText", "lblSys", {"Label": tr("system_prompt")}, 8, 220, 200, 12)
+        add_control(m, "FixedText", "lblSys", {"Label": tr("system_prompt")}, 8, 252, 200, 12)
         add_control(m, "Edit", "txtSys",
                     {"MultiLine": True, "VScroll": True},
-                    8, 234, W - 16, 120)
+                    8, 266, W - 16, 88)
 
         self.lblTest = add_control(m, "FixedText", "lblTest", {"Label": ""}, 8, 360, W - 16, 14)
         add_control(m, "Button", "btnTest", {"Label": tr("test_connection")}, 8, 378, 130, 16)
@@ -234,6 +243,13 @@ class SettingsDialog(object):
         self.dialog.getControl("chkStream").setState(
             1 if settings.get("streaming", True) else 0)
         self.dialog.getControl("txtSys").setText(settings.get("system_prompt") or "")
+        try:
+            self.dialog.getControl("txtPanelW").setText(
+                str(self.config.data.get("panel_width") or 380))
+            self.dialog.getControl("txtPanelH").setText(
+                str(self.config.data.get("panel_height") or 344))
+        except Exception:
+            pass
 
     # --- events -------------------------------------------------------------------
     def on_preset_changed(self):
@@ -267,6 +283,10 @@ class SettingsDialog(object):
                 return
             self.config.set_provider_settings(pid, settings)
             self.config.active_provider = pid
+            self.config.data["panel_width"] = self.config.coerce_int(
+                self._ctl_text("txtPanelW"), 380)
+            self.config.data["panel_height"] = self.config.coerce_int(
+                self._ctl_text("txtPanelH"), 344)
             self.config.save()
             self.saved = True
             self.pid = pid
@@ -360,7 +380,7 @@ def open_settings_for(ctx, smgr, config, pid):
     dlg.dialog.createPeer(toolkit, None)
     try:
         area = toolkit.getDesktopArea()
-        win = dlg.dialog.getWindow()
+        win = dlg.dialog.getPeer()
         ps = win.getPosSize()
         win.setPosSize(max(0, (area.Width - ps.Width) // 2),
                        max(0, (area.Height - ps.Height) // 2),

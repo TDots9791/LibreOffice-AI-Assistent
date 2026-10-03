@@ -1,4 +1,10 @@
-"""Main assistant panel: a modeless dialog usable in every LibreOffice module."""
+"""Main assistant panel: a modeless dialog usable in every LibreOffice module.
+
+Side mode: the dialog is placed exactly over LibreOffice's own sidebar
+column (right edge), so the document stays fully visible while the panel
+is open. A background "glue" loop re-anchors the panel when the LibreOffice
+window moves or resizes.
+"""
 
 import threading
 
@@ -6,9 +12,10 @@ from .. import assistant as _assistant
 from .. import document_bridge as _doc
 from ..i18n import tr
 from ..util import human_error, truncate
-from .dialog_util import (XActionListener, XItemListener, XTopWindowListener,
-                          MainThreadPump, add_control, make_dialog,
-                          make_selection, string_seq)
+from .dialog_util import (XActionListener, XItemListener,
+                          XTopWindowListener,
+                          XWindowListener, MainThreadPump, add_control,
+                          make_dialog, make_selection, string_seq)
 
 try:
     import unohelper
@@ -111,6 +118,29 @@ class _CloseHandler(unohelper.Base, XTopWindowListener):
         pass
 
 
+class _SelfResizeHandler(unohelper.Base, XWindowListener):
+    def __init__(self, panel):
+        self.panel = panel
+
+    def windowResized(self, event):
+        try:
+            self.panel.on_self_resized(event.Width, event.Height)
+        except Exception:
+            pass
+
+    def windowMoved(self, *args):
+        pass
+
+    def windowShown(self, *args):
+        pass
+
+    def windowHidden(self, *args):
+        pass
+
+    def disposing(self, *args):
+        pass
+
+
 # --- clipboard ----------------------------------------------------------------
 
 _TRANSFERABLE_CLASS = None
@@ -150,8 +180,11 @@ def _string_transferable(text):
 # --- panel ---------------------------------------------------------------------
 
 class Panel(object):
-    WIDTH = 500
-    HEIGHT = 434
+    WIDTH = 380            # ширина боковой панели, px
+    HEIGHT = 368           # высота диалога, юниты (низ: поле 16px под хинт)
+    TAB_STRIP_W = 56       # полоса вкладок sidebar у правого края
+    TOP_OFFSET = 92        # меню + панели инструментов
+    BOTTOM_OFFSET = 34     # строка состояния
 
     def __init__(self, ctx, smgr, config):
         self.ctx = ctx
@@ -165,62 +198,63 @@ class Panel(object):
         self._last_pid = None
         self._current_action = "chat"
         self._closed = False
+        self._last_geometry = None
+        self._glue_panel_w = None
+        self._base_px = None   # {control_name: (x,y,w,h)} in pixels
+        self._base_size = None
         self.pump = MainThreadPump(smgr)
         self._build()
 
     # --- construction -------------------------------------------------------
     def _build(self):
         W = self.WIDTH
-        self.dialog, m = make_dialog(self.smgr, tr("title_panel"), W, self.HEIGHT)
+        self.dialog, m = make_dialog(self.smgr, tr("title_panel"), W,
+                                      self.HEIGHT, sizeable=True)
 
-        add_control(m, "FixedText", "lblProvider", {"Label": tr("provider")}, 6, 9, 56, 12)
         add_control(m, "ComboBox", "cmbProvider",
                     {"Dropdown": True,
                      "Text": self._label_for_pid(self.config.active_provider),
                      "StringItemList": [label for _pid, label in self._preset_labels()]},
-                    64, 6, 170, 12)
+                    16, 16, 150, 12)
         add_control(m, "ComboBox", "cmbModel",
                     {"Dropdown": True, "Text": self._settings().get("model", "")},
-                    238, 6, 196, 12)
+                    170, 16, 112, 12)
         add_control(m, "Button", "btnSettings", {"Label": tr("settings_btn")},
-                    440, 5, 54, 14)
+                    286, 15, 78, 14)
 
         add_control(m, "CheckBox", "chkContext",
                     {"Label": tr("include_context"),
                      "State": 1 if self.config.data.get("include_context") else 0},
-                    6, 24, 224, 10)
-        add_control(m, "FixedText", "lblAction", {"Label": tr("action")}, 238, 25, 34, 10)
+                    16, 34, 332, 10)
         add_control(m, "ComboBox", "cmbAction",
                     {"Dropdown": True, "Text": _assistant.action_label("chat"),
                      "StringItemList": _assistant.action_labels()},
-                    274, 24, 128, 12)
+                    16, 48, 220, 12)
         add_control(m, "Edit", "txtLang",
                     {"Text": _assistant.DEFAULT_TARGET_LANG,
                      "HelpText": tr("act_translate")},
-                    406, 24, 88, 12)
+                    240, 48, 124, 12)
 
         add_control(m, "Edit", "txtChat",
                     {"MultiLine": True, "ReadOnly": True, "VScroll": True},
-                    6, 42, W - 12, 250)
+                    16, 64, W - 32, 206)
 
         add_control(m, "Edit", "txtInput", {"MultiLine": True, "VScroll": True},
-                    6, 298, W - 100, 44)
-        add_control(m, "Button", "btnSend", {"Label": tr("send"), "Default": True},
-                    W - 90, 298, 84, 20)
+                    16, 276, W - 112, 44)
+        add_control(m, "Button", "btnSend", {"Label": tr("send")}, 292, 276, 72, 20)
         add_control(m, "Button", "btnStop", {"Label": tr("stop"), "Enabled": False},
-                    W - 90, 322, 84, 20)
+                    292, 300, 72, 20)
 
         self.lblStatus = add_control(m, "FixedText", "lblStatus", {"Label": tr("ready")},
-                                     6, 348, W - 250, 12)
+                                     16, 326, 130, 12)
         add_control(m, "Button", "btnInsert", {"Label": tr("insert"), "Enabled": False},
-                    W - 238, 346, 60, 14)
+                    150, 324, 64, 14)
         add_control(m, "Button", "btnReplace", {"Label": tr("replace"), "Enabled": False},
-                    W - 174, 346, 60, 14)
+                    218, 324, 64, 14)
         add_control(m, "Button", "btnCopy", {"Label": tr("copy"), "Enabled": False},
-                    W - 110, 346, 60, 14)
-        add_control(m, "FixedText", "lblHint", {"Label": tr("hint_insert"),
-                                                "VerticalAlign": 1},
-                    6, 366, W - 12, 10)
+                    286, 324, 78, 14)
+        add_control(m, "FixedText", "lblHint", {"Label": tr("hint_resize")},
+                    16, 342, W - 32, 10)
 
         self.dialog.getControl("btnSend").addActionListener(_SendHandler(self))
         self.dialog.getControl("btnStop").addActionListener(_StopHandler(self))
@@ -260,16 +294,163 @@ class Panel(object):
         toolkit = self.smgr.createInstance("com.sun.star.awt.ExtToolkit")
         self.dialog.createPeer(toolkit, None)
         self._init_after_peer()
-        self._center()
+        self._capture_base_px()
+        self._apply_saved_size()
+        self._place_over_sidebar()
         self.dialog.setVisible(True)
+        self._hook_resize()
         self._hook_close()
+        self._start_glue()
+        self._log_line("show ok, pump=%s, native sizeable" %
+                       getattr(self.pump, "_mode", "?"))
+        self.set_status(tr("ready"))
+
+    def _win(self):
+        """XWindow панели: getWindow() у диалога нет (XControl его не объявляет);
+        peer-объект (VCLXDialog) реализует XWindow2 → XWindow."""
+        return self.dialog.getPeer()
+
+    def _capture_base_px(self):
+        """Запомнить пиксельную геометрию контролов (база для релайаута)."""
+        self._base_px = {}
         try:
-            self.dialog.toFront()
+            for name in ("cmbProvider", "cmbModel", "btnSettings",
+                         "chkContext", "cmbAction", "txtLang", "txtChat",
+                         "txtInput", "btnSend", "btnStop", "btnInsert",
+                         "btnReplace", "btnCopy", "lblStatus", "lblHint"):
+                ps = self.ctl_px(name).getPosSize()
+                self._base_px[name] = (ps.X, ps.Y, ps.Width, ps.Height)
+            ps = self._win().getPosSize()
+            self._base_size = (ps.Width, ps.Height)
+        except Exception:
+            self._base_px = None
+
+    def ctl_px(self, name):
+        return self.dialog.getControl(name).getPeer()
+
+    # Кнопки имеют ФИКСИРОВАННЫЙ размер и прижаты к правому/нижнему краю:
+    # надписи не режутся ни при каком масштабе окна; тянется только содержимое
+    # (комбобокс модели, чекбокс, действие, чат, ввод, статус, подсказка).
+    _FIXED_TOP = ("btnSettings",)
+    _FIXED_BOTTOM = ("btnSend", "btnStop", "btnInsert", "btnReplace", "btnCopy")
+
+    def _relayout_to(self, width, height):
+        """Разложить контролы под новый размер окна (width/height в px)."""
+        if not self._base_px or not self._base_size:
+            return
+        w0, h0 = self._base_size
+        b = self._base_px
+        try:
+            def place(name, x, y, w, h):
+                self.ctl_px(name).setPosSize(int(x), int(y), int(w), int(h), 15)
+
+            for name in self._FIXED_TOP:
+                x0, y0, cw, ch = b[name]
+                place(name, width - (w0 - x0 - cw), y0, cw, ch)
+            for name in self._FIXED_BOTTOM:
+                x0, y0, cw, ch = b[name]
+                place(name, width - (w0 - x0 - cw), height - (h0 - y0), cw, ch)
+
+            px, py, pw, ph = b["cmbProvider"]
+            place("cmbProvider", px, py, pw, ph)
+            sx, _sy, sw, sh = b["btnSettings"]
+            mx, my, mw, mh = b["cmbModel"]
+            place("cmbModel", mx, my,
+                  max(60, width - (w0 - sx - sw) - 4 - mx), mh)
+
+            cx, cy, cw2, ch2 = b["chkContext"]
+            place("chkContext", cx, cy,
+                  max(120, width - cx - (w0 - cx - cw2)), ch2)
+
+            lx, ly, lw, lh = b["txtLang"]
+            lang_x = width - (w0 - lx - lw)
+            ax, _ay, _aw, ah = b["cmbAction"]
+            place("cmbAction", ax, _ay, max(80, lang_x - 4 - ax), ah)
+            place("txtLang", lang_x, ly, lw, lh)
+
+            tx, ty, tw, _th = b["txtChat"]
+            ix, iy, iw, ih = b["txtInput"]
+            input_y = height - (h0 - iy)
+            place("txtChat", tx, ty,
+                  max(120, width - (w0 - tx - tw) - tx),
+                  max(40, input_y - 4 - ty))
+            place("txtInput", ix, input_y,
+                  max(80, width - (w0 - ix - iw) - ix), ih)
+
+            ins_x = width - (w0 - b["btnInsert"][0] - b["btnInsert"][2])
+            stx, sty, _stw, sth = b["lblStatus"]
+            place("lblStatus", stx, height - (h0 - sty),
+                  max(60, ins_x - 4 - stx), sth)
+            hx, hy, hw, hh = b["lblHint"]
+            place("lblHint", hx, height - (h0 - hy),
+                  max(100, width - (w0 - hx - hw) - hx), hh)
+        except Exception:
+            pass
+
+    def _apply_saved_size(self):
+        try:
+            w = int(self.config.data.get("panel_width") or 0)
+            h = int(self.config.data.get("panel_height") or 0)
+            if w > 200 and h > 200:
+                self._win().setPosSize(0, 0, w, h, 12)  # SIZE
+        except Exception:
+            pass
+
+    def apply_window_prefs(self):
+        """Вызывается из настроек: применить размер немедленно."""
+        try:
+            w = int(self.config.data.get("panel_width") or 0)
+            h = int(self.config.data.get("panel_height") or 0)
+            if w > 200 and h > 200:
+                win = self._win()
+                ps = win.getPosSize()
+                win.setPosSize(ps.X, ps.Y, w, h, 15)
+        except Exception:
+            pass
+
+    def _hook_resize(self):
+        try:
+            self._win().addWindowListener(_SelfResizeHandler(self))
+        except Exception:
+            pass
+
+    def on_self_resized(self, width, height):
+        """Ресайз делает оконный менеджер (нативный WB_SIZEABLE); здесь —
+        минимальный размер, перекладка контролов и отложенное сохранение."""
+        try:
+            ps = self._win().getPosSize()
+            w, h = ps.Width, ps.Height
+            if w < self.MIN_W or h < self.MIN_H:
+                w, h = max(self.MIN_W, w), max(self.MIN_H, h)
+                self._win().setPosSize(ps.X, ps.Y, w, h, 15)
+        except Exception:
+            w, h = int(width), int(height)
+        self._relayout_to(w, h)
+        timer = getattr(self, "_save_timer", None)
+        if timer is not None:
+            try:
+                timer.cancel()
+            except Exception:
+                pass
+        self._save_timer = threading.Timer(0.8, self._schedule_save_size)
+        self._save_timer.daemon = True
+        self._save_timer.start()
+
+    def _schedule_save_size(self):
+        # из потока таймера UNO трогать нельзя — через pump в главный поток
+        self.pump.schedule(self._save_size)
+
+    def _save_size(self):
+        try:
+            ps = self._win().getPosSize()
+            self.config.data["panel_width"] = ps.Width
+            self.config.data["panel_height"] = ps.Height
+            self.config.save()
         except Exception:
             pass
 
     def _init_after_peer(self):
-        """Combo Text is unreliable as a model property; set it on live controls."""
+        """Combo Text as a model property is unreliable; set on live controls."""
         try:
             self.on_provider_changed(force=True)
         except Exception:
@@ -280,15 +461,97 @@ class Panel(object):
         except Exception:
             pass
 
-    def _center(self):
+    # --- side placement ---------------------------------------------------------
+    def _lo_geometry(self):
+        """(frame_x, frame_y, frame_w, frame_h) окна LibreOffice или None."""
         try:
-            tk = self.smgr.createInstance("com.sun.star.awt.Toolkit")
-            area = tk.getDesktopArea()
-            win = self.dialog.getWindow()
-            ps = win.getPosSize()
-            win.setPosSize(max(0, (area.Width - ps.Width) // 2),
-                           max(0, (area.Height - ps.Height) // 2),
-                           ps.Width, ps.Height, 15)  # PosSize: X|Y|WIDTH|HEIGHT
+            desktop = self.smgr.createInstance("com.sun.star.frame.Desktop")
+            model = desktop.getCurrentComponent()
+            container = (model.getCurrentController()
+                         .getFrame().getContainerWindow())
+            ps = container.getPosSize()
+            return (ps.X, ps.Y, ps.Width, ps.Height)
+        except Exception:
+            return None
+
+    def _panel_rect(self, lo):
+        fx, fy, fw, fh = lo
+        # после ручного ресайза размер хранится в config (px); клей отслеживает
+        # только позицию окна LibreOffice, не возвращая сохранённый размер
+        w = int(self.config.data.get("panel_width") or 0)
+        h = int(self.config.data.get("panel_height") or 0)
+        if w > 200 and h > 200:
+            panel_w = w
+        else:
+            panel_w = getattr(self, "_glue_panel_w", None) or min(
+                self.WIDTH + 40, max(320, fw // 4))
+            h = fh - self.TOP_OFFSET - self.BOTTOM_OFFSET
+        x = fx + fw - panel_w - self.TAB_STRIP_W
+        y = fy + self.TOP_OFFSET
+        return (x, y, panel_w, h)
+
+    def _place_over_sidebar(self):
+        lo = self._lo_geometry()
+        if not lo:
+            self._log_line("place: no LO geometry")
+            return
+        rect = self._panel_rect(lo)
+        self._glue_panel_w = rect[2]
+        self._last_geometry = (lo, rect)
+        try:
+            self._win().setPosSize(*rect, 15)
+            self._log_line("place ok: lo=%s rect=%s" % (lo, rect))
+        except Exception as exc:
+            self._log_line("place failed: %r lo=%s rect=%s" % (exc, lo, rect))
+
+    def _start_glue(self):
+        def glue_loop():
+            import time
+            while not self._closed:
+                try:
+                    self.pump.schedule(self._glue_step)
+                except Exception:
+                    pass
+                time.sleep(0.4)
+        worker = threading.Thread(target=glue_loop)
+        worker.daemon = True
+        worker.start()
+
+    def _glue_step(self):
+        if self._closed:
+            return
+        try:
+            lo = self._lo_geometry()
+            if not lo:
+                if not getattr(self, "_glue_none_logged", False):
+                    self._glue_none_logged = True
+                    self._log_line("glue: no LO geometry")
+                return
+            rect = self._panel_rect(lo)
+            key = (lo, rect)
+            if key == self._last_geometry:
+                return
+            self._last_geometry = key
+            self._glue_panel_w = rect[2]
+            self._win().setPosSize(*rect, 15)
+        except Exception:
+            pass
+
+    # --- минимальный размер окна (ресайз — нативный, через WM) -----------------
+    MIN_W = 320
+    MIN_H = 260
+
+    def _log_line(self, text):
+        """Проброс диагностики в error.log (для обработчиков мыши)."""
+        try:
+            import os
+            from ..uno_env import default_config_dir
+            directory = default_config_dir()
+            os.makedirs(directory, exist_ok=True)
+            stamp = __import__("datetime").datetime.now().strftime("%H:%M:%S")
+            with open(os.path.join(directory, "error.log"), "a",
+                      encoding="utf-8") as fh:
+                fh.write("[%s] %s\n" % (stamp, text))
         except Exception:
             pass
 
@@ -388,6 +651,7 @@ class Panel(object):
                                   self._current_pid())
         if saved:
             self.set_status(tr("saved"))
+            self.apply_window_prefs()
         self.on_provider_changed(force=True)
 
     def on_stop(self):
@@ -416,6 +680,41 @@ class Panel(object):
             self.config.save()
         except Exception:
             pass
+
+        # --- агентный режим: модель читает и правит живой документ -----------
+        agent_mode = (action_key == "chat"
+                      and bool(self.config.data.get("agent_enabled", True)))
+        doc_model = doc_app = None
+        provider = None
+        if agent_mode:
+            try:
+                desktop = self.smgr.createInstance("com.sun.star.frame.Desktop")
+                doc_model = desktop.getCurrentComponent()
+                doc_app = _doc.detect_app(doc_model)
+                agent_mode = doc_app in ("calc", "writer")
+            except Exception:
+                agent_mode = False
+        if agent_mode:
+            try:
+                from ..providers import create_provider
+                provider = create_provider(settings)
+                agent_mode = bool(getattr(provider, "supports_tools", False))
+            except Exception:
+                agent_mode = False
+        if agent_mode:
+            self._current_action = "chat"
+            self._chat_append("%s%s\n" % (tr("you"), user_text))
+            self._streaming_text = []
+            self._cancel = threading.Event()
+            self._set_busy(True, "%s · agent …" % settings.get("model"))
+            worker = threading.Thread(
+                target=self._agent_worker,
+                args=(doc_model, provider, user_text, list(self.history),
+                      int(self.config.data.get("agent_max_steps") or 12),
+                      doc_app))
+            worker.daemon = True
+            worker.start()
+            return
 
         target_lang = self.dialog.getControl("txtLang").getText().strip() or \
             _assistant.DEFAULT_TARGET_LANG
@@ -446,7 +745,7 @@ class Panel(object):
         self._chat_append("%s%s\n" % (tr("you"), user_text or action_label_text))
         self._streaming_text = []
         self._cancel = threading.Event()
-        self._set_busy(True, "%s · %s …" % (settings.get("model"), pid))
+        self._set_busy(True, "%s …" % settings.get("model"))
 
         worker = threading.Thread(target=self._worker, args=(settings, messages))
         worker.daemon = True
@@ -461,6 +760,26 @@ class Panel(object):
             from ..providers import create_provider
             provider = create_provider(settings)
             answer = provider.stream_chat(messages, on_delta, cancel=self._cancel)
+        except Exception as exc:
+            err = human_error(exc)
+            self.pump.schedule(lambda: self._finish_error(err))
+            return
+        self.pump.schedule(lambda: self._finish_ok(answer))
+
+    def _agent_worker(self, doc_model, provider, user_text, history,
+                      max_steps, doc_app):
+        """Агентный цикл: модель + инструменты над живым документом."""
+        from ..agent import run_agent
+
+        def on_step(label):
+            self.pump.schedule(
+                lambda: self._chat_append("⚙ %s\n" % label))
+
+        try:
+            answer = run_agent(doc_model, provider, user_text, history,
+                               on_step, cancel=self._cancel,
+                               max_steps=max_steps, app=doc_app,
+                               run_on_main=lambda fn: self.pump.call(fn))
         except Exception as exc:
             err = human_error(exc)
             self.pump.schedule(lambda: self._finish_error(err))

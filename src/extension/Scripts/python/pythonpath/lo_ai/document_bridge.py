@@ -129,6 +129,35 @@ def _current_page_text(controller, limit):
         return ""
 
 
+def _calc_used_preview(model, limit):
+    """No selection: compact preview of the active sheet's used range."""
+    try:
+        controller = model.getCurrentController()
+        sheet = controller.getActiveSheet()
+        cur = sheet.createCursor()
+        cur.gotoEndOfUsedArea(False)
+        a = cur.RangeAddress
+        header = "Sheet %r, used range A%d:%s%d" % (
+            sheet.getName(), a.StartColumn + 1,
+            chr(64 + a.EndColumn) if a.EndColumn <= 26 else "?",
+            a.EndRow + 1)
+        preview_rng = sheet.getCellRangeByPosition(
+            a.StartColumn, a.StartRow, a.EndColumn,
+            min(a.EndRow, a.StartRow + 29))
+        rows = preview_rng.getDataArray()
+        lines = [header + " (first %d rows):" % len(rows)]
+        for row in rows:
+            lines.append(" | ".join("" if v is None else str(v) for v in row))
+        try:
+            names = model.getSheets().getElementNames()
+            lines.append("All sheets: " + ", ".join(names))
+        except Exception:
+            pass
+        return truncate("\n".join(lines), limit)
+    except Exception:
+        return ""
+
+
 def collect_context(model, limit=6000):
     """Build a DocContext for whatever document is currently active."""
     if model is None:
@@ -146,12 +175,20 @@ def collect_context(model, limit=6000):
         if app == WRITER:
             sel = _writer_selection_text(controller)
             ctx.selection_text = sel
-            ctx.description = ("selected text" if sel.strip()
-                               else "the document text")
+            if sel.strip():
+                ctx.description = "selected text"
+            else:
+                # без выделения отправляем весь документ, а не "(no selection)"
+                ctx.selection_text = _writer_document_text(model, limit)
+                ctx.description = "the document text"
         elif app == CALC:
             sel = _calc_selection_text(controller, limit)
             ctx.selection_text = sel
-            ctx.description = "selected cells"
+            if sel.strip():
+                ctx.description = "selected cells"
+            else:
+                ctx.selection_text = _calc_used_preview(model, limit)
+                ctx.description = "the active sheet (used range preview)"
         elif app in (IMPRESS, DRAW):
             sel = _draw_selection_text(controller, limit)
             ctx.selection_text = sel

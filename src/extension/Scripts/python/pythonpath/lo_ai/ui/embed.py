@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """Embedded assistant UI for the LibreOffice sidebar (lo_ai.ui.embed).
 
-Builds a compact chat panel as a UnoControlDialog whose peer lives on the
-sidebar-provided parent window; relayouts on parent resize.
+The panel window is created the officially supported way:
+    ContainerWindowProvider.createContainerWindow(xdl_url, "", parent, None)
+which returns a live dialog control container parented into the sidebar
+panel. Controls are accessed by name via root.getControl(name); the root
+window is resized from XSidebarPanel.getHeightForWidth().
 """
 
 import threading
@@ -12,8 +15,7 @@ from .. import document_bridge as _doc
 from ..i18n import tr
 from ..util import human_error, truncate
 from .dialog_util import (XActionListener, XItemListener, XWindowListener,
-                          MainThreadPump, add_control, make_dialog,
-                          make_selection, string_seq)
+                          MainThreadPump, string_seq)
 
 try:
     import uno
@@ -23,11 +25,7 @@ except Exception:
     unohelper = object
 
 _POSIZE_ALL = 15  # X|Y|WIDTH|HEIGHT
-
-try:
-    from com.sun.star.awt import XTopWindowListener  # noqa: F401 (unused here)
-except Exception:
-    pass
+EXTENSION_ID = "org.sphaera.lo.assistant"
 
 
 class _SendHandler(unohelper.Base, XActionListener):
@@ -71,6 +69,22 @@ class _SettingsHandler(unohelper.Base, XActionListener):
         self.view.on_open_settings()
 
 
+class _ContextHandler(unohelper.Base, XItemListener):
+    def __init__(self, view):
+        self.view = view
+
+    def itemStateChanged(self, *args):
+        try:
+            state = self.view.ctl("chkContext").getState()
+            self.view.config.data["include_context"] = bool(state)
+            self.view.config.save()
+        except Exception:
+            pass
+
+    def disposing(self, *args):
+        pass
+
+
 class _ProviderHandler(unohelper.Base, XItemListener):
     def __init__(self, view):
         self.view = view
@@ -88,8 +102,7 @@ class _ParentResizeHandler(unohelper.Base, XWindowListener):
 
     def windowResized(self, event):
         try:
-            rect = event.Source.getPosSize()
-            self.view.relayout(rect.Width, rect.Height)
+            self.view.relayout(event.Width, event.Height)
         except Exception:
             pass
 
@@ -109,11 +122,10 @@ class _ParentResizeHandler(unohelper.Base, XWindowListener):
 class EmbeddedPanel(object):
     """Compact assistant view embedded into a sidebar panel window."""
 
-    ROW_TOP = 26
-    ROW_INPUT = 56
-    ROW_SEND = 24
-    ROW_STATUS = 20
     MARGIN = 6
+    STATUS_H = 14
+    BTN_H = 20
+    INPUT_H = 48
 
     def __init__(self, ctx, smgr, config, parent_window):
         self.ctx = ctx
@@ -126,48 +138,27 @@ class EmbeddedPanel(object):
         self._cancel = threading.Event()
         self._streaming_text = []
         self._last_pid = None
+        self._current_action = "chat"
         self.pump = MainThreadPump(smgr)
         self._build()
-        self._hook_resize()
+        try:
+            self.parent.addWindowListener(_ParentResizeHandler(self))
+        except Exception:
+            pass
 
     # --- construction -------------------------------------------------------
     def _build(self):
-        self.dialog, m = make_dialog(self.smgr, tr("title_panel"), 320, 600)
+        provider = self.smgr.createInstanceWithContext(
+            "com.sun.star.awt.ContainerWindowProvider", self.ctx)
+        xdl_url = self._extension_url() + "/Dialogs/AIChat.xdl"
+        # Returns a live dialog control container parented into the sidebar.
+        self.root = provider.createContainerWindow(xdl_url, "", self.parent, None)
+        if self.root is None:
+            raise RuntimeError("ContainerWindowProvider returned no window")
 
-        add_control(m, "ComboBox", "cmbProvider",
-                    {"Dropdown": True,
-                     "Text": self._label_for_pid(self.config.active_provider),
-                     "StringItemList": [l for _p, l in self._preset_labels()]},
-                    4, 2, 140, 12)
-        add_control(m, "ComboBox", "cmbModel",
-                    {"Dropdown": True, "Text": self._settings().get("model", "")},
-                    148, 2, 116, 12)
-        add_control(m, "Button", "btnSettings", {"Label": "…"}, 268, 1, 24, 14)
-
-        add_control(m, "CheckBox", "chkContext",
-                    {"Label": tr("include_context"),
-                     "State": 1 if self.config.data.get("include_context") else 0},
-                    4, 16, 200, 10)
-
-        add_control(m, "Edit", "txtChat",
-                    {"MultiLine": True, "ReadOnly": True, "VScroll": True},
-                    4, 30, 288, 380)
-
-        add_control(m, "Edit", "txtInput", {"MultiLine": True, "VScroll": True},
-                    4, 416, 288, 44)
-
-        add_control(m, "Button", "btnSend", {"Label": tr("send")}, 4, 464, 90, 18)
-        add_control(m, "Button", "btnStop", {"Label": tr("stop"), "Enabled": False},
-                    98, 464, 70, 18)
-        add_control(m, "Button", "btnInsert", {"Label": tr("insert"), "Enabled": False},
-                    172, 464, 60, 18)
-        add_control(m, "Button", "btnReplace", {"Label": tr("replace"), "Enabled": False},
-                    236, 464, 70, 18)
-        add_control(m, "Button", "btnCopy", {"Label": tr("copy"), "Enabled": False},
-                    310, 464, 60, 18)
-
-        self.lblStatus = add_control(m, "FixedText", "lblStatus",
-                                     {"Label": tr("ready")}, 4, 486, 288, 12)
+        self._fill_provider_combo()
+        self._fill_model_combo()
+        self._fill_action_combo()
 
         for name, handler in (("btnSend", _SendHandler(self)),
                               ("btnStop", _StopHandler(self)),
@@ -175,64 +166,27 @@ class EmbeddedPanel(object):
                               ("btnReplace", _ApplyHandler(self, "replace")),
                               ("btnCopy", _CopyHandler(self)),
                               ("btnSettings", _SettingsHandler(self))):
-            self.dialog.getControl(name).addActionListener(handler)
-        self.dialog.getControl("chkContext").addItemListener(
-            _ProviderCtxHandler(self))
-        self.dialog.getControl("cmbProvider").addItemListener(
-            _ProviderHandler(self))
+            self.ctl(name).addActionListener(handler)
+        self.ctl("chkContext").addItemListener(_ContextHandler(self))
+        self.ctl("cmbProvider").addItemListener(_ProviderHandler(self))
 
-    def _hook_resize(self):
         try:
-            self.parent.addWindowListener(_ParentResizeHandler(self))
-        except Exception:
-            pass
-        try:
-            ps = self.parent.getPosSize()
-            self.relayout(ps.Width, ps.Height)
+            self.ctl("txtLang").setText(_assistant.DEFAULT_TARGET_LANG)
+            self.ctl("cmbAction").setText(_assistant.action_label("chat"))
+            self.ctl("cmbModel").setText(self.config.provider_settings(
+                self._current_pid()).get("model", ""))
+            self.ctl("lblStatus").setText(tr("ready"))
         except Exception:
             pass
 
-    def relayout(self, width, height):
-        """Pixel-position all controls to fit the sidebar panel size."""
-        if not width or not height:
-            return
-        try:
-            win = self.dialog.getWindow()
-            win.setPosSize(0, 0, width, height, _POSIZE_ALL)
-        except Exception:
-            return
-        M = self.MARGIN
+    def _extension_url(self):
+        pip = self.ctx.getValueByName(
+            "/singletons/com.sun.star.deployment.PackageInformationProvider")
+        return pip.getPackageLocation(EXTENSION_ID)
 
-        def place(name, x, y, w, h):
-            try:
-                self.dialog.getControl(name).getWindow().setPosSize(
-                    x, y, w, h, _POSIZE_ALL)
-            except Exception:
-                pass
+    def ctl(self, name):
+        return self.root.getControl(name)
 
-        place("cmbProvider", M, 2, 140, 20)
-        place("cmbModel", M + 144, 2, max(60, width - M * 2 - 144 - 30), 20)
-        place("btnSettings", width - M - 26, 2, 26, 20)
-        place("chkContext", M, 26, min(240, width - M * 2), 16)
-
-        chat_y = 46
-        send_h = 22
-        input_h = 52
-        status_h = 16
-        chat_h = height - chat_y - M - input_h - M - send_h - M - status_h - 4
-        place("txtChat", M, chat_y, width - M * 2, max(60, chat_h))
-        input_y = chat_y + max(60, chat_h) + M
-        place("txtInput", M, input_y, width - M * 2, input_h)
-        btn_y = input_y + input_h + M
-        bw = (width - M * 2 - M * 3) // 4
-        place("btnSend", M, btn_y, bw, send_h)
-        place("btnStop", M + (bw + M), btn_y, bw, send_h)
-        place("btnInsert", M + (bw + M) * 2, btn_y, bw, send_h)
-        place("btnReplace", M + (bw + M) * 3, btn_y, max(40, bw - 10), send_h)
-        place("btnCopy", width - M - max(40, bw - 10), btn_y, max(40, bw - 10), send_h)
-        place("lblStatus", M, btn_y + send_h + 4, width - M * 2, status_h)
-
-    # --- helpers -------------------------------------------------------------
     def _preset_labels(self):
         from ..providers import preset_labels
         return preset_labels()
@@ -250,57 +204,143 @@ class EmbeddedPanel(object):
         return None
 
     def _current_pid(self):
-        return self._pid_for_label(self.dialog.getControl("cmbProvider").getText()) \
+        return self._pid_for_label(self.ctl("cmbProvider").getText()) \
             or self.config.active_provider
 
     def _settings(self):
         return self.config.provider_settings(self._current_pid())
 
+    def _fill_provider_combo(self):
+        try:
+            self.ctl("cmbProvider").getModel().setPropertyValue(
+                "StringItemList",
+                string_seq([l for _p, l in self._preset_labels()]))
+            self.ctl("cmbProvider").setText(
+                self._label_for_pid(self.config.active_provider))
+        except Exception:
+            pass
+
+    def _fill_model_combo(self):
+        try:
+            from ..providers import get_preset
+            pid = self._current_pid()
+            models = list(get_preset(pid).get("models", []))
+            saved = self.config.provider_settings(pid).get("model", "")
+            if saved and saved not in models:
+                models.insert(0, saved)
+            self.ctl("cmbModel").getModel().setPropertyValue(
+                "StringItemList", string_seq(models))
+            self.ctl("cmbModel").setText(saved)
+        except Exception:
+            pass
+
+    def _fill_action_combo(self):
+        try:
+            self.ctl("cmbAction").getModel().setPropertyValue(
+                "StringItemList", string_seq(_assistant.action_labels()))
+            self.ctl("cmbAction").setText(_assistant.action_label("chat"))
+        except Exception:
+            pass
+
+    # --- layout ---------------------------------------------------------------
+    def relayout(self, width, height):
+        if not width or not height:
+            return
+        try:
+            self.root.setPosSize(0, 0, width, height, _POSIZE_ALL)
+        except Exception:
+            pass
+        M = self.MARGIN
+        w = width
+
+        def place(name, x, y, cw, ch):
+            try:
+                self.ctl(name).setPosSize(x, y, cw, ch, _POSIZE_ALL)
+            except Exception:
+                pass
+
+        place("cmbProvider", M, 2, 150, 20)
+        place("cmbModel", M + 154, 2, max(50, w - M * 2 - 154 - 28), 20)
+        place("btnSettings", w - M - 26, 2, 26, 20)
+        place("chkContext", M, 26, min(250, w - M * 2), 16)
+
+        chat_y = 46
+        bottom = height - M
+        status_h = self.STATUS_H
+        btn_y = bottom - status_h - self.BTN_H
+        input_y = btn_y - M - self.INPUT_H
+        chat_h = input_y - M - chat_y
+        place("txtChat", M, chat_y, w - M * 2, max(40, chat_h))
+        place("txtInput", M, input_y, w - M * 2, self.INPUT_H)
+        bw = (w - M * 2 - M) // 3
+        place("btnSend", M, btn_y, bw, self.BTN_H)
+        place("btnStop", M + bw + M, btn_y, bw, self.BTN_H)
+        place("btnInsert", M + (bw + M) * 2, btn_y,
+              w - M * 2 - (bw + M) * 2, self.BTN_H)
+        place("btnReplace", M, btn_y - self.BTN_H - 2, bw, self.BTN_H)
+        place("btnCopy", M + bw + M, btn_y - self.BTN_H - 2, bw, self.BTN_H)
+        place("lblStatus", M, bottom - status_h + 2, w - M * 2, status_h)
+
+    def getHeightForWidth(self, n_width):
+        """XSidebarPanel layout hook: fit to the given column width."""
+        try:
+            rect = self.parent.getPosSize()
+            height = rect.Height if rect.Height > 0 else 400
+        except Exception:
+            height = 400
+        try:
+            self.relayout(n_width, height)
+        except Exception:
+            pass
+        import uno
+        ls = uno.createUnoStruct("com.sun.star.ui.LayoutSize")
+        ls.MinimumWidth = 220
+        ls.MinimumHeight = -1
+        ls.MaximumHeight = 400
+        return ls
+
+    def getMinimalWidth(self):
+        return 220
+
+    # --- helpers -------------------------------------------------------------
     def set_status(self, text):
         try:
-            self.lblStatus.setPropertyValue("Label", text)
+            self.ctl("lblStatus").setText(text)
         except Exception:
             pass
 
     def _chat_append(self, text):
         try:
-            chat = self.dialog.getControl("txtChat")
+            chat = self.ctl("txtChat")
             new = chat.getText() + text
             chat.setText(new)
-            sel = make_selection(len(new), len(new))
-            if sel is not None:
-                chat.setSelection(sel)
+            import uno
+            sel = uno.createUnoStruct("com.sun.star.awt.Selection")
+            sel.Min = len(new)
+            sel.Max = len(new)
+            chat.setSelection(sel)
         except Exception:
             pass
 
     def _enable_apply(self, enabled):
         for name in ("btnInsert", "btnReplace", "btnCopy"):
             try:
-                self.dialog.getControl(name).getModel().setPropertyValue(
-                    "Enabled", enabled)
+                self.ctl(name).getModel().setPropertyValue("Enabled", enabled)
             except Exception:
                 pass
 
     # --- events -----------------------------------------------------------------
     def on_provider_changed(self):
-        pid = self._current_pid()
-        if pid == self._last_pid:
-            return
-        self._last_pid = pid
-        settings = self.config.provider_settings(pid)
         try:
             from ..providers import get_preset
+            pid = self._current_pid()
             models = list(get_preset(pid).get("models", []))
-            if settings.get("model") and settings["model"] not in models:
-                models.insert(0, settings["model"])
-            self.dialog.getControl("cmbModel").getModel().setPropertyValue(
+            saved = self.config.provider_settings(pid).get("model", "")
+            if saved and saved not in models:
+                models.insert(0, saved)
+            self.ctl("cmbModel").getModel().setPropertyValue(
                 "StringItemList", string_seq(models))
-            self.dialog.getControl("cmbModel").setText(settings.get("model", ""))
-        except Exception:
-            pass
-        self.config.active_provider = pid
-        try:
-            self.config.save()
+            self.ctl("cmbModel").setText(saved)
         except Exception:
             pass
 
@@ -318,15 +358,16 @@ class EmbeddedPanel(object):
     def on_send(self):
         if self.busy:
             return
-        user_text = self.dialog.getControl("txtInput").getText().strip()
-        action_key = "chat"
-        if not user_text:
+        user_text = self.ctl("txtInput").getText().strip()
+        action_key = _assistant.action_key_by_label(
+            self.ctl("cmbAction").getText())
+        if action_key == "chat" and not user_text:
             self.set_status(tr("type_first"))
             return
 
         pid = self._current_pid()
         settings = dict(self.config.provider_settings(pid))
-        settings["model"] = self.dialog.getControl("cmbModel").getText().strip()
+        settings["model"] = self.ctl("cmbModel").getText().strip()
         if not settings["model"]:
             self.set_status(tr("choose_model"))
             return
@@ -349,7 +390,8 @@ class EmbeddedPanel(object):
                 context_block = ""
 
         user_message = _assistant.build_user_message(
-            action_key, user_text, context_block, None)
+            action_key, user_text, context_block,
+            _assistant.DEFAULT_TARGET_LANG)
         messages = _assistant.build_messages(
             settings.get("system_prompt") or None, self.history, user_message)
 
@@ -438,7 +480,7 @@ class _ProviderCtxHandler(unohelper.Base, XItemListener):
 
     def itemStateChanged(self, *args):
         try:
-            state = self.view.dialog.getControl("chkContext").getState()
+            state = self.view.ctl("chkContext").getState()
             self.view.config.data["include_context"] = bool(state)
             self.view.config.save()
         except Exception:

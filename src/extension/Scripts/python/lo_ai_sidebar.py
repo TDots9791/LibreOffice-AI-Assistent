@@ -25,6 +25,8 @@ from com.sun.star.awt import XWindow  # noqa: F401 (typing reference)
 from com.sun.star.task import XJob
 from com.sun.star.ui import XUIElement
 from com.sun.star.ui import XUIElementFactory
+from com.sun.star.ui import XToolPanel
+from com.sun.star.ui import XSidebarPanel
 from com.sun.star.lang import XServiceInfo
 
 try:
@@ -36,6 +38,7 @@ if os.path.isdir(_pp) and _pp not in sys.path:
     sys.path.insert(0, _pp)
 
 FACTORY_PREFIX = "loai"
+_LAST_PANEL = {"parent": None, "panel": None}
 FACTORY_SERVICE = "org.sphaera.lo.ai.uifactory"
 JOB_SERVICE = "org.sphaera.lo.ai.startupjob"
 PANEL_URL = "loai.panel"
@@ -77,7 +80,11 @@ def register_factory(ctx):
     return ok
 
 
-class _SidebarUIElement(unohelper.Base, XUIElement, XServiceInfo):
+class _SidebarUIElement(unohelper.Base, XUIElement, XToolPanel, XSidebarPanel,
+                        XServiceInfo):
+    """The sidebar attaches content by querying XToolPanel.getWindow() and
+    lays it out via XSidebarPanel.getHeightForWidth()."""
+
     def __init__(self, ctx, url, args, window, panel):
         self._ctx = ctx
         self._url = url
@@ -101,6 +108,28 @@ class _SidebarUIElement(unohelper.Base, XUIElement, XServiceInfo):
 
     def getObject(self):
         return self._window
+
+    # XToolPanel — this is what sfx2 Panel::GetElementWindow() queries
+    def getWindow(self):
+        return self._window
+
+    def createAccessible(self, parent_accessible):
+        return self._window
+
+    # XSidebarPanel — the sidebar drives our layout through this
+    def getHeightForWidth(self, width):
+        try:
+            return self._panel.getHeightForWidth(width)
+        except Exception:
+            import uno
+            ls = uno.createUnoStruct("com.sun.star.ui.LayoutSize")
+            ls.MinimumWidth = 220
+            ls.MinimumHeight = -1
+            ls.MaximumHeight = 400
+            return ls
+
+    def getMinimalWidth(self):
+        return 220
 
     # XServiceInfo
     def getImplementationName(self):
@@ -141,9 +170,17 @@ class _UIFactory(unohelper.Base, XUIElementFactory, XServiceInfo):
                 set_lang(cfg.data.get("ui_lang", "auto"), self._ctx, smgr)
             except Exception:
                 pass
+            previous = _LAST_PANEL.get("panel")
+            if previous is not None:
+                try:
+                    previous.root.dispose()
+                except Exception:
+                    pass
             panel = EmbeddedPanel(self._ctx, smgr, cfg, parent)
-            return _SidebarUIElement(self._ctx, url, args,
-                                     panel.dialog.getWindow(), panel)
+            _LAST_PANEL["panel"] = panel
+            # panel.root is the ContainerWindowProvider result: it is both
+            # the control container (getControl) and the content window.
+            return _SidebarUIElement(self._ctx, url, args, panel.root, panel)
         except Exception as exc:
             try:
                 from lo_ai.uno_env import default_config_dir

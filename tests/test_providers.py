@@ -58,6 +58,27 @@ MESSAGES = [
 ]
 
 
+class TestAllPresets(unittest.TestCase):
+    """Каждый пресет подключается к своему API-стилю (живой HTTP на mock)."""
+
+    EXPECTED = {"openai": "Hello from chat",
+                "anthropic": "Hi from claude",
+                "responses": "Codex!"}
+
+    def test_every_preset_connects(self):
+        from lo_ai.providers.presets import PRESETS
+        self.assertGreaterEqual(len(PRESETS), 15)
+        for pid, preset in PRESETS.items():
+            with self.subTest(preset=pid):
+                style = preset["api_style"]
+                p = create_provider(settings(style))
+                seen = []
+                answer = p.stream_chat(MESSAGES, seen.append)
+                self.assertEqual(answer, self.EXPECTED[style],
+                                 "preset %s (style %s)" % (pid, style))
+                self.assertEqual("".join(seen), answer)
+
+
 class TestOpenAICompat(unittest.TestCase):
     def test_streaming(self):
         p = create_provider(settings("openai"))

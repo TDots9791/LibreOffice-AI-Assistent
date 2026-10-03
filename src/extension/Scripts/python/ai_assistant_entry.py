@@ -62,25 +62,24 @@ def get_config():
     return Config(resolve_config_dir(_component_context(), _smgr()))
 
 
-def _log_exception(context, exc):
-    """Append failures to <config>/error.log — silent menus must not be mute."""
+def _log_line(text):
+    """Append a timestamped line to the diag log (no UNO calls)."""
     try:
         _bootstrap()
         from lo_ai.uno_env import default_config_dir
         directory = default_config_dir()
         os.makedirs(directory, exist_ok=True)
-        try:
-            cfg_path = os.path.dirname(get_config().path)
-            if os.path.isdir(cfg_path):
-                directory = cfg_path
-        except Exception:
-            pass
+        stamp = __import__("datetime").datetime.now().strftime("%H:%M:%S")
         with open(os.path.join(directory, "error.log"), "a",
                   encoding="utf-8") as fh:
-            fh.write("---- %s (%s)\n%s\n" % (
-                context, exc, traceback.format_exc()))
+            fh.write("[%s] %s\n" % (stamp, text))
     except Exception:
         traceback.print_exc()
+
+
+def _log_exception(context, exc):
+    """Append failures to <config>/error.log — silent menus must not be mute."""
+    _log_line("%s: %r\n%s" % (context, exc, traceback.format_exc()))
 
 
 def _error_box(exc):
@@ -128,41 +127,9 @@ def _register_sidebar_factory():
 
 
 def open_panel(*args):
-    """Show the assistant panel: sidebar deck first, floating window fallback."""
+    """Open the assistant as a side panel glued to the LibreOffice window."""
     try:
-        _log_line("open_panel click, v=%s" % VERSION_TEXT)
         _init_lang()
-        _register_sidebar_factory()
-        try:
-            desktop = _smgr().createInstance("com.sun.star.frame.Desktop")
-            model = desktop.getCurrentComponent()
-            controller = model.getCurrentController()
-            sidebar = None
-            try:
-                sidebar = controller.getSidebar()
-            except Exception as exc:
-                _log_exception("controller.getSidebar", exc)
-            if sidebar is None:
-                # The sidebar object is created lazily; make sure it exists.
-                try:
-                    helper = _smgr().createInstance(
-                        "com.sun.star.frame.DispatchHelper")
-                    helper.executeDispatch(controller.getFrame(),
-                                           ".uno:Sidebar", "", 0, ())
-                except Exception as exc:
-                    _log_exception("dispatch .uno:Sidebar", exc)
-                try:
-                    sidebar = controller.getSidebar()
-                except Exception as exc:
-                    _log_exception("controller.getSidebar (2nd)", exc)
-            if sidebar is None:
-                raise RuntimeError("sidebar provider unavailable")
-            sidebar.showDeck("LoAIDeck")
-            _log_line("showDeck OK — sidebar deck opened")
-            return  # docked panel opened — document stays visible
-        except Exception as exc:
-            _log_line("sidebar deck route FAILED -> floating fallback")
-            _log_exception("sidebar deck route", exc)
         from lo_ai.ui.panel import show_panel
         show_panel(_component_context(), _smgr(), get_config())
     except Exception as exc:  # must not die silently from a menu click
@@ -173,7 +140,6 @@ def open_settings(*args):
     """Show the provider settings dialog."""
     try:
         _init_lang()
-        _register_sidebar_factory()
         from lo_ai.i18n import tr
         from lo_ai.ui.settings_dialog import open_settings_for
         saved = open_settings_for(_component_context(), _smgr(), get_config(), None)

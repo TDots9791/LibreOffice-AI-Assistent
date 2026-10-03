@@ -10,10 +10,14 @@ try:
     from com.sun.star.awt import XCallback  # type: ignore
     from com.sun.star.awt import XEventHandler  # type: ignore
     from com.sun.star.awt import XTopWindowListener  # type: ignore
+    from com.sun.star.awt import XWindowListener  # type: ignore
+    from com.sun.star.awt import XMouseListener  # type: ignore
+    from com.sun.star.awt import XMouseMotionListener  # type: ignore
 except Exception:  # tooling outside LibreOffice: classes must still import
     uno = None
     XActionListener = XItemListener = object
     XCallback = XEventHandler = XTopWindowListener = object
+    XWindowListener = XMouseListener = XMouseMotionListener = object
 
 
 def available():
@@ -31,11 +35,16 @@ def make_selection(start, end):
         return None
 
 
-def make_dialog(smgr, title, width, height):
+def make_dialog(smgr, title, width, height, sizeable=False):
     model = smgr.createInstance("com.sun.star.awt.UnoControlDialogModel")
     model.setPropertyValue("Title", title)
     model.setPropertyValue("Width", width)
     model.setPropertyValue("Height", height)
+    if sizeable:
+        # Sizeable на МОДЕЛИ читается в createPeer (BASEPROPERTY_SIZEABLE ->
+        # WindowAttribute.SIZEABLE -> WB_SIZEABLE): живой ресайз делает WM
+        model.setPropertyValue("Sizeable", True)
+        model.setPropertyValue("Moveable", True)
     dialog = smgr.createInstance("com.sun.star.awt.UnoControlDialog")
     dialog.setModel(model)
     return dialog, model
@@ -119,6 +128,36 @@ class MainThreadPump(object):
             with self._lock:
                 self._mode = "direct"
             self._drain()
+
+    def call(self, fn, timeout=60.0):
+        """Run fn on the main thread and wait for the result (agent tools).
+
+        Returns (ok, value) — value is the result or the exception.
+        In "direct" mode there is no main thread queue: fn runs inline on
+        the calling thread (last-resort behavior, same as schedule()).
+        """
+        if self._mode == "direct":
+            try:
+                return True, fn()
+            except Exception as exc:
+                return False, exc
+        done = threading.Event()
+        box = {}
+
+        def run():
+            try:
+                box["ok"] = True
+                box["value"] = fn()
+            except Exception as exc:
+                box["ok"] = False
+                box["value"] = exc
+            finally:
+                done.set()
+
+        self.schedule(run)
+        if not done.wait(timeout):
+            return False, TimeoutError("main-thread call timed out")
+        return box.get("ok", False), box.get("value")
 
     # com.sun.star.awt.XCallback
     def notify(self, *args):

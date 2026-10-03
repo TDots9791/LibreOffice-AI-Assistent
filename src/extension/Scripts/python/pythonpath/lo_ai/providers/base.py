@@ -17,6 +17,22 @@ class ProviderError(Exception):
         self.status = status
 
 
+class AssistantTurn(object):
+    """One model turn: text and/or requested tool calls.
+
+    tool_calls items: {"id": str, "name": str, "args": str} — args is the
+    raw JSON string as the model produced it (parsed by the caller).
+    """
+
+    def __init__(self, content=None, tool_calls=None):
+        self.content = content
+        self.tool_calls = list(tool_calls or [])
+
+    @property
+    def has_tool_calls(self):
+        return bool(self.tool_calls)
+
+
 def wrap_errors(fn):
     """Turn transport errors into ProviderError for the UI layer."""
     try:
@@ -40,6 +56,7 @@ class Provider(object):
     """Abstract chat provider. `stream_chat` must return the full answer."""
 
     api_style = "abstract"
+    supports_tools = False
 
     def __init__(self, settings):
         self.base_url = (settings.get("base_url") or "").rstrip("/")
@@ -64,6 +81,14 @@ class Provider(object):
 
     def stream_chat(self, messages, on_delta, cancel=None):
         raise NotImplementedError
+
+    def chat_with_tools(self, messages, tools, cancel=None):
+        """Non-streaming turn with function calling. `tools` is a list of
+        {"name","description","parameters"} specs. Returns AssistantTurn;
+        messages may contain assistant tool_calls and role="tool" results.
+        Implemented only where the API style supports it."""
+        raise NotImplementedError("tool calling not supported by %s"
+                                  % self.api_style)
 
     def list_models(self):
         """Live model ids from GET {base_url}/models (OpenAI/Anthropic shape)."""
