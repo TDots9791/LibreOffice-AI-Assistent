@@ -209,7 +209,11 @@ if _UNO_AVAILABLE:
             global _CTX
             _CTX = ctx
 
-        def execute(self, *args):
+        def trigger(self, *args):
+            # XJobExecutor's method is trigger(URL) — ServiceHandler calls
+            # exactly this after createInstanceWithContext; an execute()
+            # method would never be found (pyuno AttributeError, silently
+            # swallowed by the dispatch framework).
             try:
                 self._ACTION()
             except Exception as exc:  # noqa: BLE001
