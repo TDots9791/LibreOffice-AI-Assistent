@@ -195,6 +195,12 @@ tools/  build.py · gen_icons.py
 
 - Agent mode (tools) is implemented for OpenAI-compatible providers; Anthropic/Codex run
   as plain chat without tools.
+- **LibreOffice 24.2 (Windows)**: if the extension is “silent” after installation (the
+  menu is there, clicks do nothing) — make sure the **Python Scripting Support**
+  component is installed (enabled by default in the standard installer; reinstall LO
+  with it) and update LibreOffice: 24.2 reached end of life in May 2024, the extension
+  is tested on 26.8. The extension's Python code runs on the bundled Python — without
+  it the assistant does not start and does not report errors.
 - In LibreOffice **flatpak** the remote URP bridge is unstable — a quirk of the build;
   the extension works in-process and is unaffected.
 - Impress/Draw are supported in the basic scenario (reading/inserting shape text);
