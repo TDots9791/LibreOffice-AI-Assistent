@@ -200,8 +200,9 @@ class Panel(object):
         self._closed = False
         self._last_geometry = None
         self._glue_panel_w = None
-        self._base_px = None   # {control_name: (x,y,w,h)} in pixels
+        self._base = None      # {control_name: (x,y,w,h)} в диалоговых юнитах
         self._base_size = None
+        self._factor = 1.0     # px на один диалоговый юнит
         self.pump = MainThreadPump(smgr)
         self._build()
 
@@ -294,11 +295,12 @@ class Panel(object):
         toolkit = self.smgr.createInstance("com.sun.star.awt.ExtToolkit")
         self.dialog.createPeer(toolkit, None)
         self._init_after_peer()
-        self._capture_base_px()
+        self._hook_resize()
+        self._capture_layout()
         self._apply_saved_size()
         self._place_over_sidebar()
+        self._relayout_to_current()
         self.dialog.setVisible(True)
-        self._hook_resize()
         self._hook_close()
         self._start_glue()
         self._log_line("show ok, pump=%s, native sizeable" %
@@ -310,20 +312,33 @@ class Panel(object):
         peer-объект (VCLXDialog) реализует XWindow2 → XWindow."""
         return self.dialog.getPeer()
 
-    def _capture_base_px(self):
-        """Запомнить пиксельную геометрию контролов (база для релайаута)."""
-        self._base_px = {}
+    def _capture_layout(self):
+        """База раскладки в ДИАЛОГОВЫХ ЮНИТАХ (модели контролов) + множитель
+        px/юнит. Юниты — единственный надёжный способ раскладки: VCL сам
+        переводит их в пиксели, рассинхрона единиц и DPI не бывает."""
+        self._base = None
         try:
+            base = {}
             for name in ("cmbProvider", "cmbModel", "btnSettings",
                          "chkContext", "cmbAction", "txtLang", "txtChat",
                          "txtInput", "btnSend", "btnStop", "btnInsert",
                          "btnReplace", "btnCopy", "lblStatus", "lblHint"):
-                ps = self.ctl_px(name).getPosSize()
-                self._base_px[name] = (ps.X, ps.Y, ps.Width, ps.Height)
-            ps = self._win().getPosSize()
-            self._base_size = (ps.Width, ps.Height)
+                m = self.dialog.getControl(name).getModel()
+                base[name] = (m.getPropertyValue("PositionX"),
+                              m.getPropertyValue("PositionY"),
+                              m.getPropertyValue("Width"),
+                              m.getPropertyValue("Height"))
+            dm = self.dialog.getModel()
+            self._base_size = (dm.getPropertyValue("Width") or 380,
+                               dm.getPropertyValue("Height") or 368)
+            win = self._win().getPosSize()
+            if self._base_size[0] and win.Width:
+                self._factor = win.Width / float(self._base_size[0])
+            else:
+                self._factor = 1.0
+            self._base = base
         except Exception:
-            self._base_px = None
+            self._base = None
 
     def ctl_px(self, name):
         return self.dialog.getControl(name).getPeer()
@@ -331,61 +346,75 @@ class Panel(object):
     # Кнопки имеют ФИКСИРОВАННЫЙ размер и прижаты к правому/нижнему краю:
     # надписи не режутся ни при каком масштабе окна; тянется только содержимое
     # (комбобокс модели, чекбокс, действие, чат, ввод, статус, подсказка).
+    # Раскладка задается в диалоговых юнитах и применяется через МОДЕЛИ
+    # контролов — VCL сам отображает юниты в пиксели.
     _FIXED_TOP = ("btnSettings",)
     _FIXED_BOTTOM = ("btnSend", "btnStop", "btnInsert", "btnReplace", "btnCopy")
 
-    def _relayout_to(self, width, height):
-        """Разложить контролы под новый размер окна (width/height в px)."""
-        if not self._base_px or not self._base_size:
+    def _relayout_units(self, wu, hu):
+        """Разложить контролы в юнитах под окно размером wu×hu юнитов."""
+        b = self._base
+        if not b:
             return
-        w0, h0 = self._base_size
-        b = self._base_px
+        W0, H0 = self._base_size
+
+        def place(name, x, y, w, h):
+            m = self.dialog.getControl(name).getModel()
+            m.setPropertyValue("PositionX", int(round(x)))
+            m.setPropertyValue("PositionY", int(round(y)))
+            m.setPropertyValue("Width", max(8, int(round(w))))
+            m.setPropertyValue("Height", max(8, int(round(h))))
+
+        for name in self._FIXED_TOP:
+            x0, y0, uw, uh = b[name]
+            place(name, wu - (W0 - x0 - uw), y0, uw, uh)
+        for name in self._FIXED_BOTTOM:
+            x0, y0, uw, uh = b[name]
+            place(name, wu - (W0 - x0 - uw), hu - (H0 - y0), uw, uh)
+
+        px, py, pw, ph = b["cmbProvider"]
+        place("cmbProvider", px, py, pw, ph)
+        sx, _sy, sw, sh = b["btnSettings"]
+        mx, my, _mw, mh = b["cmbModel"]
+        place("cmbModel", mx, my, max(40, wu - (W0 - sx - sw) - 4 - mx), mh)
+
+        cx, cy, cw, ch = b["chkContext"]
+        place("chkContext", cx, cy, max(60, wu - cx - (W0 - cx - cw)), ch)
+
+        lx, ly, lw, lh = b["txtLang"]
+        lang_x = wu - (W0 - lx - lw)
+        ax, ay, _aw, ah = b["cmbAction"]
+        place("cmbAction", ax, ay, max(40, lang_x - 4 - ax), ah)
+        place("txtLang", lang_x, ly, lw, lh)
+
+        tx, ty, tw, _th = b["txtChat"]
+        ix, iy, iw, ih = b["txtInput"]
+        input_y = hu - (H0 - iy)
+        place("txtChat", tx, ty, max(60, wu - (W0 - tx - tw) - tx),
+              max(20, input_y - 4 - ty))
+        place("txtInput", ix, input_y, max(60, wu - (W0 - ix - iw) - ix), ih)
+
+        ins_x = wu - (W0 - b["btnInsert"][0] - b["btnInsert"][2])
+        stx, sty, _stw, sth = b["lblStatus"]
+        place("lblStatus", stx, hu - (H0 - sty), max(30, ins_x - 4 - stx), sth)
+        hx, hy, hw, hh = b["lblHint"]
+        place("lblHint", hx, hu - (H0 - hy),
+              max(60, wu - (W0 - hx - hw) - hx), hh)
+
+    def _relayout_px(self, width, height):
+        """Релайаут по размеру окна в пикселях (через множитель px/юнит)."""
+        if not self._base:
+            return
+        f = getattr(self, "_factor", 1.0) or 1.0
+        self._relayout_units(width / f, height / f)
+
+    def _relayout_to_current(self):
+        """Переложить контролы под фактический текущий размер окна."""
         try:
-            def place(name, x, y, w, h):
-                self.ctl_px(name).setPosSize(int(x), int(y), int(w), int(h), 15)
-
-            for name in self._FIXED_TOP:
-                x0, y0, cw, ch = b[name]
-                place(name, width - (w0 - x0 - cw), y0, cw, ch)
-            for name in self._FIXED_BOTTOM:
-                x0, y0, cw, ch = b[name]
-                place(name, width - (w0 - x0 - cw), height - (h0 - y0), cw, ch)
-
-            px, py, pw, ph = b["cmbProvider"]
-            place("cmbProvider", px, py, pw, ph)
-            sx, _sy, sw, sh = b["btnSettings"]
-            mx, my, mw, mh = b["cmbModel"]
-            place("cmbModel", mx, my,
-                  max(60, width - (w0 - sx - sw) - 4 - mx), mh)
-
-            cx, cy, cw2, ch2 = b["chkContext"]
-            place("chkContext", cx, cy,
-                  max(120, width - cx - (w0 - cx - cw2)), ch2)
-
-            lx, ly, lw, lh = b["txtLang"]
-            lang_x = width - (w0 - lx - lw)
-            ax, _ay, _aw, ah = b["cmbAction"]
-            place("cmbAction", ax, _ay, max(80, lang_x - 4 - ax), ah)
-            place("txtLang", lang_x, ly, lw, lh)
-
-            tx, ty, tw, _th = b["txtChat"]
-            ix, iy, iw, ih = b["txtInput"]
-            input_y = height - (h0 - iy)
-            place("txtChat", tx, ty,
-                  max(120, width - (w0 - tx - tw) - tx),
-                  max(40, input_y - 4 - ty))
-            place("txtInput", ix, input_y,
-                  max(80, width - (w0 - ix - iw) - ix), ih)
-
-            ins_x = width - (w0 - b["btnInsert"][0] - b["btnInsert"][2])
-            stx, sty, _stw, sth = b["lblStatus"]
-            place("lblStatus", stx, height - (h0 - sty),
-                  max(60, ins_x - 4 - stx), sth)
-            hx, hy, hw, hh = b["lblHint"]
-            place("lblHint", hx, height - (h0 - hy),
-                  max(100, width - (w0 - hx - hw) - hx), hh)
+            ps = self._win().getPosSize()
         except Exception:
-            pass
+            return
+        self._relayout_px(ps.Width, ps.Height)
 
     def _apply_saved_size(self):
         try:
@@ -393,6 +422,7 @@ class Panel(object):
             h = int(self.config.data.get("panel_height") or 0)
             if w > 200 and h > 200:
                 self._win().setPosSize(0, 0, w, h, 12)  # SIZE
+                self._relayout_to_current()
         except Exception:
             pass
 
@@ -405,6 +435,7 @@ class Panel(object):
                 win = self._win()
                 ps = win.getPosSize()
                 win.setPosSize(ps.X, ps.Y, w, h, 15)
+                self._relayout_to_current()
         except Exception:
             pass
 
@@ -425,7 +456,7 @@ class Panel(object):
                 self._win().setPosSize(ps.X, ps.Y, w, h, 15)
         except Exception:
             w, h = int(width), int(height)
-        self._relayout_to(w, h)
+        self._relayout_px(w, h)
         timer = getattr(self, "_save_timer", None)
         if timer is not None:
             try:
@@ -534,6 +565,7 @@ class Panel(object):
             self._last_geometry = key
             self._glue_panel_w = rect[2]
             self._win().setPosSize(*rect, 15)
+            self._relayout_to_current()
         except Exception:
             pass
 
