@@ -132,7 +132,7 @@ chat mode (tools for those styles are planned).
 
 Identical on all three systems — via the extension manager:
 
-1. Download `dist/sphaera-lo-ai-assistant.oxt` (or build it: `./build.sh`).
+1. Download the latest `.oxt` from [Releases](https://github.com/TDots9791/LibreOffice-AI-Assistent/releases/latest) (or build it: `./build.sh`).
 2. LibreOffice → **Tools ▸ Extension Manager… ▸ Add** → pick the file.
 3. Fully restart LibreOffice — the **AI Assistant** menu and a toolbar button appear.
 

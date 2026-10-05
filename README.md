@@ -129,7 +129,7 @@ API: `tests/test_providers.py`). Для reasoning-моделей OpenAI (`o1/o3/
 
 На всех трёх системах установка одинаковая — через менеджер расширений:
 
-1. Скачайте `dist/sphaera-lo-ai-assistant.oxt` (или соберите сами: `./build.sh`).
+1. Скачайте последний `.oxt` со страницы [Releases](https://github.com/TDots9791/LibreOffice-AI-Assistent/releases/latest) (или соберите сами: `./build.sh`).
 2. LibreOffice → **Сервис ▸ Управление расширениями… ▸ Добавить** → выберите файл.
 3. Полностью перезапустите LibreOffice — появится меню **AI-ассистент** и кнопка на панели.
 

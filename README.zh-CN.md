@@ -121,7 +121,7 @@ AI 聊天。勾选 **“操作文档（智能体）”** 后，助手变为智�
 
 三种系统上的安装方式相同——通过扩展管理器：
 
-1. 下载 `dist/sphaera-lo-ai-assistant.oxt`（或自行构建：`./build.sh`）。
+1. 从 [Releases](https://github.com/TDots9791/LibreOffice-AI-Assistent/releases/latest) 下载最新 `.oxt`（或自行构建：`./build.sh`）。
 2. LibreOffice → **工具 ▸ 扩展管理器… ▸ 添加** → 选择文件。
 3. 完全重启 LibreOffice——出现 **AI 助手** 菜单和工具栏按钮。
 
