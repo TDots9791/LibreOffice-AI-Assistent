@@ -216,12 +216,10 @@ class Panel(object):
                     {"Dropdown": True,
                      "Text": self._label_for_pid(self.config.active_provider),
                      "StringItemList": [label for _pid, label in self._preset_labels()]},
-                    16, 16, 150, 12)
+                    16, 16, 164, 12)
         add_control(m, "ComboBox", "cmbModel",
                     {"Dropdown": True, "Text": self._settings().get("model", "")},
-                    170, 16, 112, 12)
-        add_control(m, "Button", "btnSettings", {"Label": tr("settings_btn")},
-                    286, 15, 78, 14)
+                    184, 16, 180, 12)
 
         add_control(m, "CheckBox", "chkContext",
                     {"Label": tr("include_context"),
@@ -256,7 +254,6 @@ class Panel(object):
         self.dialog.getControl("btnInsert").addActionListener(_ApplyHandler(self, "insert"))
         self.dialog.getControl("btnReplace").addActionListener(_ApplyHandler(self, "replace"))
         self.dialog.getControl("btnCopy").addActionListener(_CopyHandler(self))
-        self.dialog.getControl("btnSettings").addActionListener(_SettingsHandler(self))
         self.dialog.getControl("chkContext").addItemListener(_ContextHandler(self))
         self.dialog.getControl("cmbProvider").addItemListener(_ProviderHandler(self))
 
@@ -291,7 +288,6 @@ class Panel(object):
         self._init_after_peer()
         self._hook_resize()
         self._capture_layout()
-        self._apply_saved_size()
         self._place_over_sidebar()
         self._relayout_to_current()
         self.dialog.setVisible(True)
@@ -312,7 +308,7 @@ class Panel(object):
         self._base = None
         try:
             base = {}
-            for name in ("cmbProvider", "cmbModel", "btnSettings",
+            for name in ("cmbProvider", "cmbModel",
                          "chkContext", "cmbAction", "txtChat",
                          "txtInput", "btnSend", "btnStop", "btnInsert",
                          "btnReplace", "btnCopy", "lblStatus"):
@@ -329,7 +325,6 @@ class Panel(object):
     # Кнопки имеют ФИКСИРОВАННЫЙ размер и прижаты к правому/нижнему краю:
     # надписи не режутся ни при каком масштабе окна; тянется только содержимое
     # (комбобокс модели, чекбокс, действие, чат, ввод, статус).
-    _FIXED_TOP = ("btnSettings",)
     _FIXED_BOTTOM = ("btnSend", "btnStop", "btnInsert", "btnReplace", "btnCopy")
 
     def _relayout_px(self, width, height):
@@ -344,18 +339,14 @@ class Panel(object):
                 int(round(x)), int(round(y)), max(8, int(round(w))),
                 max(8, int(round(h))), 15)
 
-        for name in self._FIXED_TOP:
-            x0, y0, cw, ch = b[name]
-            place(name, width - (w0 - x0 - cw), y0, cw, ch)
         for name in self._FIXED_BOTTOM:
             x0, y0, cw, ch = b[name]
             place(name, width - (w0 - x0 - cw), height - (h0 - y0), cw, ch)
 
         px, py, pw, ph = b["cmbProvider"]
         place("cmbProvider", px, py, pw, ph)
-        sx, _sy, sw, sh = b["btnSettings"]
         mx, my, _mw, mh = b["cmbModel"]
-        place("cmbModel", mx, my, max(40, width - (w0 - sx - sw) - 4 - mx), mh)
+        place("cmbModel", mx, my, max(40, width - 16 - mx), mh)
 
         cx, cy, cw2, ch2 = b["chkContext"]
         place("chkContext", cx, cy, max(60, width - cx - (w0 - cx - cw2)), ch)
@@ -383,24 +374,6 @@ class Panel(object):
             return
         self._relayout_px(ps.Width, ps.Height)
 
-    def _relayout_to_current(self):
-        """Переложить контролы под фактический текущий размер окна."""
-        try:
-            ps = self._win().getPosSize()
-        except Exception:
-            return
-        self._relayout_px(ps.Width, ps.Height)
-
-    def _apply_saved_size(self):
-        try:
-            w = int(self.config.data.get("panel_width") or 0)
-            h = int(self.config.data.get("panel_height") or 0)
-            if w > 200 and h > 200:
-                self._win().setPosSize(0, 0, w, h, 12)  # SIZE
-                self._relayout_to_current()
-        except Exception:
-            pass
-
     def apply_window_prefs(self):
         """Вызывается из настроек: применить размер немедленно."""
         try:
@@ -421,16 +394,24 @@ class Panel(object):
             pass
 
     def on_self_resized(self, width, height):
-        """Ресайз делает оконный менеджер (нативный WB_SIZEABLE); здесь —
-        минимальный размер, перекладка контролов и отложенное сохранение."""
+        """Ресайз делает оконный менеджер (нативный WB_SIZEABLE). Размер берём
+        из СОБЫТИЯ (фактический), а не из getPosSize (на Wayland может отдавать
+        запрошенное, а не выданное); плюс минимальный размер и сохранение."""
         try:
             ps = self._win().getPosSize()
-            w, h = ps.Width, ps.Height
-            if w < self.MIN_W or h < self.MIN_H:
-                w, h = max(self.MIN_W, w), max(self.MIN_H, h)
-                self._win().setPosSize(ps.X, ps.Y, w, h, 15)
         except Exception:
-            w, h = int(width), int(height)
+            ps = None
+        w, h = int(width or 0), int(height or 0)
+        if ps is not None and (ps.Width, ps.Height) != (w, h):
+            self._log_line("resize: event=%dx%d getPosSize=%dx%d"
+                           % (w, h, ps.Width, ps.Height))
+        if w < self.MIN_W or h < self.MIN_H:
+            w, h = max(self.MIN_W, w), max(self.MIN_H, h)
+            try:
+                self._win().setPosSize(
+                    ps.X if ps else 0, ps.Y if ps else 0, w, h, 15)
+            except Exception:
+                pass
         self._relayout_px(w, h)
         timer = getattr(self, "_save_timer", None)
         if timer is not None:
@@ -481,20 +462,19 @@ class Panel(object):
             return None
 
     def _panel_rect(self, lo):
-        fx, fy, fw, fh = lo
-        # после ручного ресайза размер хранится в config (px); клей отслеживает
-        # только позицию окна LibreOffice, не возвращая сохранённый размер
-        w = int(self.config.data.get("panel_width") or 0)
-        h = int(self.config.data.get("panel_height") or 0)
-        if w > 200 and h > 200:
-            panel_w = w
-        else:
-            panel_w = getattr(self, "_glue_panel_w", None) or min(
-                self.WIDTH + 40, max(320, fw // 4))
-            h = fh - self.TOP_OFFSET - self.BOTTOM_OFFSET
-        x = fx + fw - panel_w - self.TAB_STRIP_W
+        """Только ПОЗИЦИЯ у правого края окна LibreOffice. Размер не навязываем:
+        на Wayland клиент не управляет позицией/размером топлевел-окон, а раскладка
+        подстраивается под фактический размер по событию ресайза."""
+        fx, fy, _fw, _fh = lo
+        try:
+            ps = self._win().getPosSize()
+            panel_w, panel_h = ps.Width, ps.Height
+        except Exception:
+            panel_w = getattr(self, "_glue_panel_w", None) or (self.WIDTH + 40)
+            panel_h = 640
+        x = fx + _fw - panel_w - self.TAB_STRIP_W
         y = fy + self.TOP_OFFSET
-        return (x, y, panel_w, h)
+        return (x, y, panel_w, panel_h)
 
     def _place_over_sidebar(self):
         lo = self._lo_geometry()
